@@ -1,6 +1,8 @@
 import configparser
-from datetime import timedelta, datetime
 import json
+import os
+from datetime import timedelta, datetime
+import sys
 import random
 import requests
 import schedule
@@ -10,8 +12,11 @@ import logging
 
 from scraper import RssScrap
 
+
+DEBUG = os.getenv("DEBUG", True)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO if not DEBUG else logging.DEBUG,
     format='%(asctime)s %(levelname)s %(message)s',
     handlers=[
         logging.FileHandler("in.log"),
@@ -21,7 +26,7 @@ logging.basicConfig(
 
 
 def ask_chatgpt(config, content, token_limit=150):
-    preamble = config["preamble"]
+    preamble = config["gpt_preamble"]
     bio = config["bio"]
 
     system_messages = [
@@ -30,7 +35,7 @@ def ask_chatgpt(config, content, token_limit=150):
     ]
 
     user_messages = [
-        {"role": "user", "content": item} for item in content
+        {"role": "user", "content": item.get('description')} for item in content
     ]
 
     gpt_messages = system_messages + user_messages
@@ -39,17 +44,21 @@ def ask_chatgpt(config, content, token_limit=150):
     response_text = ''
     while True:
         try:
+            if DEBUG:
+                logging.info(f"DEBUG: {gpt_messages}")
+                return "This is a test message"
+
+            logging.info(f"Requesting GPT with messages: {gpt_messages}")
             response = openai.ChatCompletion.create(
                 model='gpt-3.5-turbo',
                 messages=gpt_messages,
                 max_tokens=token_limit,
                 stop=["xx"],
             )
-            logging.info(f'Usage: {response["usage"]}')
+            logging.info(f'Usage: {response.get("usage")}')
             response_text = response.choices[0].message['content'].strip()
             logging.info(f"Text from GPT: {response_text}")
             return response_text
-
         except openai.error.RateLimitError:
             logging.error(f"Rate limit exceeded. Retrying in {request_wait_time_seconds} seconds...")
         except openai.error.ServiceUnavailableError:
@@ -84,7 +93,7 @@ def post_linkedin(payload_text, cookies_conf):
         "postState": "PUBLISHED",
         "media": []
     }
-    session = get_session()
+    payload = json.dumps(payload)
     cookie_value = "li_at=%s; JSESSIONID=\"%s\"" % (cookies_conf["li_at"], cookies_conf["JSESSIONID"])
     headers = {
         "accept": "application/vnd.linkedin.normalized+json+2.1",
@@ -96,14 +105,15 @@ def post_linkedin(payload_text, cookies_conf):
         "Referrer": "https://www.linkedin.com/feed/",
         "Referrer-Policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
         "cookie": cookie_value
+        # ... other headers ...
     }
 
     post_endpoint = "https://www.linkedin.com/voyager/api/contentcreation/normShares"
 
     try:
-        response = session.post(post_endpoint, headers=headers, data=payload)
+        response = requests.post(post_endpoint, headers=headers, data=payload)
         response.raise_for_status()
-
+        logging.info(f"LinkedIn post success")
         if response.json().get('someKey', None) == 'expectedValue':
             pass
 
@@ -149,7 +159,6 @@ def schedule_next_task(**kwargs):
 
 
 if __name__ == "__main__":
-    import sys
 
     main()
 
