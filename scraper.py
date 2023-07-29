@@ -1,6 +1,4 @@
 import random
-from configparser import ConfigParser
-
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -12,12 +10,12 @@ class Scraper:
         self.url = url
         self.character_limit = character_limit
 
-    def fetch_content(self):
+    def fetch_content(self) -> dict:
         logging.info(f"Fetching content from {self.url}")
         response = requests.get(self.url)
         if response.status_code == 200:
             return self.parse(response.text)
-        return None
+        return {}
 
     def parse(self, content):
         soup = BeautifulSoup(content, 'html.parser')
@@ -39,16 +37,21 @@ class Scraper:
 
 class RssScrap(Scraper):
 
-    def parse(self, content):
+    def parse(self, content) -> dict:
         news = []
         try:
-            soup = BeautifulSoup(content, 'xml')
+            soup = BeautifulSoup(content, 'lxml')
             for item in soup.find_all('item'):
+                image = item.find('enclosure')
+                if image:
+                    image = image.get('url')
+                if not image:
+                    image = item.find('media:thumbnail').get('url')
                 news.append({
                     'title': item.find('title').text,
                     'link': item.find('link').text,
                     'description': item.find('description').text,
-                    'thumbnail': item.find('media:thumbnail').get('url'),
+                    'image': image
                 })
         except Exception as e:
             logging.error(f"Error: {e}")
@@ -59,8 +62,6 @@ class RssScrap(Scraper):
 
 
 if __name__ == '__main__':
-    config = ConfigParser()
-    config.read('config.ini')
-    xss_urls = config.get('websites', 'websites').split(',')
-    r = RssScrap('https://www.entrepreneur.com/latest.rss').fetch_content()
-    print(r)
+    url = 'https://www.newscientist.com/subject/space/feed/'
+    scraper = RssScrap(url)
+    print(scraper.fetch_content())
