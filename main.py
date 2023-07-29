@@ -294,6 +294,7 @@ def main_task(**kwargs):
 
 def schedule_next_task(**kwargs):
     schedule.clear()
+    logging.info("Scheduling next task")
     minutes_for_next_task = random.randint(30, 90)
     time_to_execute = datetime.now() + timedelta(minutes=minutes_for_next_task)
     logging.info(f"Next task scheduled in {minutes_for_next_task} minutes. Time to execute: {time_to_execute}")
