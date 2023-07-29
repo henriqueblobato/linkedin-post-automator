@@ -1,6 +1,7 @@
 import configparser
 import json
 import os
+import uuid
 from datetime import timedelta, datetime
 import sys
 import random
@@ -9,6 +10,7 @@ import schedule
 import openai
 from time import sleep
 import logging
+from time import time
 
 from scraper import RssScrap
 
@@ -80,6 +82,143 @@ def get_session():
     return globals()["linkedin_session"]
 
 
+def post_pool(payload_text, cookies_conf):
+    cookie_value = "li_at=%s; JSESSIONID=\"%s\"" % (cookies_conf["li_at"], cookies_conf["JSESSIONID"])
+    headers = {
+        "accept": "application/vnd.linkedin.normalized+json+2.1",
+        "accept-language": "en-US,en;q=0.9",
+        "content-type": "application/json; charset=UTF-8",
+        "csrf-token": cookies_conf["JSESSIONID"],
+        "referrer-policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
+        "origin": "https://www.linkedin.com",
+        "Referrer": "https://www.linkedin.com/feed/",
+        "Referrer-Policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
+        "cookie": cookie_value
+    }
+    json_pool = {
+        'question': 'enquete teste 2',
+        'duration': 259200,  # 3 days
+        'options': [
+            'asd2',
+            'asd2',
+            'asd2',
+        ],
+    }
+    json_post = {
+      "visibleToConnectionsOnly": True,
+      "externalAudienceProviders": [],
+      "commentaryV2": {
+        "text": "enquete asd asd asd asdasd",
+        "attributes": []
+      },
+      "origin": "FEED",
+      "allowedCommentersScope": "CONNECTIONS_ONLY",
+      "postState": "PUBLISHED",
+      "media": [
+        {
+          "mediaUrn": "urn:li:fs_poll:7091150921715396608"
+        }
+      ]
+    }
+    try:
+        get_urn = requests.post(
+            'https://www.linkedin.com/voyager/api/voyagerFeedPollsPoll',
+            headers=headers,
+            json=json_pool,
+            verify=False,
+        )
+        get_urn.raise_for_status()
+
+        urn = get_urn.headers['Location'].split('/')[-1]
+        json_post['media'][0]['mediaUrn'] = urn
+        json_post['media'][0]['poll']['question'] = json_pool['question']
+        json_post['media'][0]['poll']['options'] = json_pool['options']
+
+        response_post = requests.post(
+            'https://www.linkedin.com/voyager/api/contentcreation/normShares',
+            headers=headers,
+            json=json_post,
+            verify=False,
+        )
+        response_post.raise_for_status()
+
+        logging.info(f"LinkedIn queue success!")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error posting to LinkedIn: {e}")
+
+
+def post_with_image(post_info, cookies_conf):
+    cookie_value = "li_at=%s; JSESSIONID=\"%s\"" % (cookies_conf["li_at"], cookies_conf["JSESSIONID"])
+    headers = {
+        "accept": "application/vnd.linkedin.normalized+json+2.1",
+        "accept-language": "en-US,en;q=0.9",
+        "content-type": "application/json; charset=UTF-8",
+        "Csrf-Token": cookies_conf["JSESSIONID"],
+        "referrer-policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
+        "origin": "https://www.linkedin.com",
+        "Referrer": "https://www.linkedin.com/feed/",
+        "Referrer-Policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
+        "cookie": cookie_value
+    }
+    cookie = {
+        "li_at": cookies_conf["li_at"],
+        "JSESSIONID": cookies_conf["JSESSIONID"]
+    }
+    image = post_info["image"]
+    image_bin = requests.get(image).content
+    image_size = len(image_bin)
+    payload = {
+      "mediaUploadType": "IMAGE_SHARING",
+      "fileSize": image_size,
+      "filename": f"{str(uuid.uuid4()).replace('-', '')}.png"
+    }
+    image_response = requests.post(
+        'https://www.linkedin.com/voyager/api/voyagerVideoDashMediaUploadMetadata?action=upload',
+        headers=headers,
+        json=json.dumps(payload),
+        cookies=cookie,
+    )
+    image_response.raise_for_status()
+    logging.info(f"LinkedIn image get info success!")
+    upload_response = image_response.json()
+    upload_url = upload_response['data']['value']['singleUploadUrl']
+    media_urn = upload_response['data']['value']['urn']
+    upload_put = requests.put(
+        upload_url,
+        headers=headers,
+        data=image_bin,
+        verify=False,
+    )
+    upload_put.raise_for_status()
+    logging.info(f"LinkedIn image upload success!")
+    post_payload = {
+      "visibleToConnectionsOnly": False,
+      "externalAudienceProviders": [],
+      "commentaryV2": {
+        "text": post_info["text"],
+        "attributes": []
+      },
+      "origin": "FEED",
+      "allowedCommentersScope": "CONNECTIONS_ONLY",
+      "postState": "PUBLISHED",
+      "media": [
+        {
+          "category": "IMAGE",
+          "mediaUrn": media_urn,
+          "tapTargets": []
+        }
+      ]
+    }
+    response_post = requests.post(
+        'https://www.linkedin.com/voyager/api/contentcreation/normShares',
+        headers=headers,
+        json=json.dumps(post_payload),
+        verify=False,
+    )
+    response_post.raise_for_status()
+    logging.info(f"LinkedIn post with image success!")
+
+
 def post_linkedin(payload_text, cookies_conf):
     payload = {
         "visibleToConnectionsOnly": False,
@@ -105,7 +244,6 @@ def post_linkedin(payload_text, cookies_conf):
         "Referrer": "https://www.linkedin.com/feed/",
         "Referrer-Policy": "strict-origin-when-cross-origin, strict-origin-when-cross-origin",
         "cookie": cookie_value
-        # ... other headers ...
     }
 
     post_endpoint = "https://www.linkedin.com/voyager/api/contentcreation/normShares"
@@ -143,6 +281,9 @@ def main(config_path='config.ini'):
 
     gpt_res = ask_chatgpt(settings, content, token_limit=gpt_token_limit)
     post_linkedin(gpt_res, cookies_conf)
+    # content = content[0]
+    # content['text'] = gpt_res
+    # post_with_image(content, cookies_conf)
 
 
 def main_task(**kwargs):
@@ -152,6 +293,7 @@ def main_task(**kwargs):
 
 
 def schedule_next_task(**kwargs):
+    schedule.clear()
     minutes_for_next_task = random.randint(30, 90)
     time_to_execute = datetime.now() + timedelta(minutes=minutes_for_next_task)
     logging.info(f"Next task scheduled in {minutes_for_next_task} minutes. Time to execute: {time_to_execute}")
