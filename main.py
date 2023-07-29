@@ -15,7 +15,7 @@ from time import time
 from scraper import RssScrap
 
 
-DEBUG = os.getenv("DEBUG", True)
+DEBUG = False
 
 logging.basicConfig(
     level=logging.INFO if not DEBUG else logging.DEBUG,
@@ -47,7 +47,7 @@ def ask_chatgpt(config, content, token_limit=150):
     while True:
         try:
             if DEBUG:
-                logging.info(f"DEBUG: {gpt_messages}")
+                logging.info(f"[!!] DEBUG: {gpt_messages}")
                 return "This is a test message"
 
             logging.info(f"Requesting GPT with messages: {gpt_messages}")
